@@ -439,6 +439,8 @@ public class HoodieTimelineArchiver<T extends HoodieAvroPayload, I, K, O> {
       Option<HoodieInstant> oldestInstantToRetainForClustering =
           ClusteringUtils.getOldestInstantToRetainForClustering(table.getActiveTimeline(), table.getMetaClient());
 
+      List<String> excludeCommitsFromArchive = table.getIndex().getListOfCommitsExcludeFromArchival(table);
+
       // Actually do the commits
       Stream<HoodieInstant> instantToArchiveStream = commitTimeline.getInstantsAsStream()
           .filter(s -> {
@@ -472,7 +474,8 @@ public class HoodieTimelineArchiver<T extends HoodieAvroPayload, I, K, O> {
               oldestInstantToRetainForClustering.map(instantToRetain ->
                       HoodieTimeline.compareTimestamps(s.getTimestamp(), LESSER_THAN, instantToRetain.getTimestamp()))
                   .orElse(true)
-          );
+          ).filter(s ->
+                      !excludeCommitsFromArchive.contains(s.getTimestamp()));
       return instantToArchiveStream.limit(commitTimeline.countInstants() - minInstantsToKeep);
     } else {
       return Stream.empty();
