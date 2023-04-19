@@ -54,12 +54,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import scala.Tuple2;
+
+import static org.apache.hudi.common.model.HoodieConsistentHashingMetadata.HASHING_METADATA_FILE_SUFFIX;
 
 /**
  * Consistent hashing bucket index implementation, with auto-adjust bucket number.
@@ -243,6 +247,42 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
     return false;
   }
 
+  /**
+   * Get latest committed metadata file for a partition
+   *
+   * @param table     hoodie table
+   * @param partition partition for which latest committed metadata file needed
+   * @return latest committed metadata file for a partition
+   */
+  private String getLatestMetaFileCommittedForPartition(HoodieTable table, String partition) {
+    HoodieTimeline hoodieTimeline = table.getActiveTimeline().getCompletedReplaceTimeline();
+    Path metadataPath = FSUtils.getPartitionPath(table.getMetaClient().getHashingMetadataPath(), partition);
+    try {
+      FileStatus[] metaFiles = table.getMetaClient().getFs().listStatus(metadataPath);
+      Predicate<FileStatus> metaFilePredicate = fileStatus -> {
+        String filename = fileStatus.getPath().getName();
+        if (!filename.contains(HASHING_METADATA_FILE_SUFFIX)) {
+          return false;
+        }
+        String timestamp = HoodieConsistentHashingMetadata.getTimestampFromFile(filename);
+        return hoodieTimeline.containsInstant(timestamp) || timestamp.equals(HoodieTimeline.INIT_INSTANT_TS);
+      };
+      FileStatus metaFile = Arrays.stream(metaFiles).filter(metaFilePredicate).max(Comparator.comparing(a -> a.getPath().getName())).orElse(null);
+      Arrays.stream(metaFiles).forEach(file -> {
+        if (!file.getPath().getName().equals(metaFile.getPath().getName())) {
+          try {
+            table.getMetaClient().getFs().delete(file.getPath());
+          } catch (IOException e) {
+            LOG.warn("Unable to delete bucket metadata file: " + file.getPath().getName(), e);
+          }
+        }
+      });
+      return HoodieConsistentHashingMetadata.getTimestampFromFile(metaFile.getPath().getName());
+    } catch (IOException e) {
+      throw new HoodieIndexException("Error while loading hashing metadata", e);
+    }
+  }
+
   public class ConsistentBucketIndexLocationMapper implements BucketIndexLocationMapper {
 
     /**
@@ -274,5 +314,50 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
           + partitionToIdentifier.get(partitionPath).getMetadata().getFilename() + ", record_key: " + key.toString());
       throw new HoodieIndexException("Failed to getBucket as hashing node has no file group");
     }
+  }
+
+  /**
+   * Update default metadata file(00000000000000.hashing_meta) with the latest committed metadata file so that default file will be in sync
+   * with latest commit.
+   *
+   * @param table
+   */
+  public void updateMetadata(HoodieTable table) {
+    Map<String, String> partitionVisiteddMap = new HashMap<>();
+    HoodieTimeline hoodieTimeline = table.getActiveTimeline().getCompletedReplaceTimeline();
+    hoodieTimeline.getInstants().forEach(instant -> {
+      Option<Pair<HoodieInstant, HoodieClusteringPlan>> instantPlanPair =
+          ClusteringUtils.getClusteringPlan(table.getMetaClient(), HoodieTimeline.getReplaceCommitRequestedInstant(instant.getTimestamp()));
+      HoodieClusteringPlan plan = instantPlanPair.get().getRight();
+      List<Map<String, String>> partitionMapList = plan.getInputGroups().stream().map(HoodieClusteringGroup::getExtraMetadata).collect(Collectors.toList());
+      partitionMapList.stream().forEach(partitionMap -> {
+        String partition = partitionMap.get(SparkConsistentBucketClusteringPlanStrategy.METADATA_PARTITION_KEY);
+        if (!partitionVisiteddMap.containsKey(partition)) {
+          String replacedCommit = getLatestMetaFileCommittedForPartition(table, partition);
+          Option<HoodieConsistentHashingMetadata> hoodieConsistentHashingMetadataOption = loadMetadata(table, partition);
+          if (hoodieConsistentHashingMetadataOption.isPresent()) {
+            try {
+              overWriteMetadata(table, hoodieConsistentHashingMetadataOption.get(), HoodieTimeline.INIT_INSTANT_TS + HASHING_METADATA_FILE_SUFFIX);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          }
+          if (Objects.nonNull(replacedCommit)) {
+            partitionVisiteddMap.put(partition, replacedCommit);
+          }
+        }
+      });
+    });
+  }
+
+  private boolean overWriteMetadata(HoodieTable table, HoodieConsistentHashingMetadata metadata, String fileName) throws IOException {
+    HoodieWrapperFileSystem fs = table.getMetaClient().getFs();
+    Path dir = FSUtils.getPartitionPath(table.getMetaClient().getHashingMetadataPath(), metadata.getPartitionPath());
+    Path fullPath = new Path(dir, fileName);
+    FSDataOutputStream fsOut = fs.create(fullPath, true);
+    byte[] bytes = metadata.toBytes();
+    fsOut.write(bytes);
+    fsOut.close();
+    return true;
   }
 }

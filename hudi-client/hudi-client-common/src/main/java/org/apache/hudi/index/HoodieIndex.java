@@ -152,6 +152,9 @@ public abstract class HoodieIndex<I, O> implements Serializable {
   public void close() {
   }
 
+  public void updateMetadata(HoodieTable table) {
+  }
+
   public enum IndexType {
     HBASE, INMEMORY, BLOOM, GLOBAL_BLOOM, SIMPLE, GLOBAL_SIMPLE, BUCKET, FLINK_STATE
   }
