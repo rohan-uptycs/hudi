@@ -154,6 +154,14 @@ public abstract class HoodieIndex<I, O> implements Serializable {
   public void close() {
   }
 
+  /***
+   * Updates index metadata of the given table and instant if needed.
+   * @param table The committed table.
+   * @param hoodieInstant The instant to commit.
+   */
+  public void commitIndexMetadataIfNeeded(HoodieTable table, String hoodieInstant) {
+  }
+
   @EnumDescription("Determines how input records are indexed, i.e., looked up based on the key "
       + "for the location in the existing table. Default is SIMPLE on Spark engine, and INMEMORY "
       + "on Flink and Java engines.")
