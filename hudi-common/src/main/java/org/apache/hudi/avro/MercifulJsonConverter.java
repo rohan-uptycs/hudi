@@ -27,6 +27,8 @@ import org.apache.avro.Schema;
 import org.apache.avro.Schema.Type;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -41,6 +43,8 @@ import java.util.Map;
  * Converts Json record to Avro Generic Record.
  */
 public class MercifulJsonConverter {
+
+  private static final Logger LOG = LogManager.getLogger(MercifulJsonConverter.class);
 
   private static final Map<Schema.Type, JsonToAvroFieldProcessor> FIELD_TYPE_PROCESSORS = getFieldTypeProcessors();
 
@@ -148,7 +152,7 @@ public class MercifulJsonConverter {
     public Object convertToAvro(Object value, String name, Schema schema) {
       Pair<Boolean, Object> res = convert(value, name, schema);
       if (!res.getLeft()) {
-        throw new HoodieJsonToAvroConversionException(value, name, schema);
+        LOG.warn("error converting failed" + name + "to type " + schema.getType().toString() + " for value {} " + value);
       }
       return res.getRight();
     }

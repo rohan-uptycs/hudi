@@ -18,9 +18,6 @@
 
 package org.apache.hudi.io;
 
-import org.apache.avro.Schema;
-import org.apache.avro.generic.IndexedRecord;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.engine.TaskContextSupplier;
@@ -59,6 +56,10 @@ import org.apache.hudi.exception.HoodieAppendException;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieUpsertException;
 import org.apache.hudi.table.HoodieTable;
+
+import org.apache.avro.Schema;
+import org.apache.avro.generic.IndexedRecord;
+import org.apache.hadoop.fs.Path;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
@@ -249,7 +250,7 @@ public class HoodieAppendHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
         // Prepend meta-fields into the record
         MetadataValues metadataValues = populateMetadataFields(finalRecord);
         HoodieRecord populatedRecord =
-            finalRecord.prependMetaFields(schema, writeSchemaWithMetaFields, metadataValues, recordProperties);
+            finalRecord.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, recordProperties, true);
 
         // NOTE: Record have to be cloned here to make sure if it holds low-level engine-specific
         //       payload pointing into a shared, mutable (underlying) buffer we get a clean copy of
@@ -400,18 +401,18 @@ public class HoodieAppendHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
       // If column stats index is enabled but columns not configured then we assume that
       // all columns should be indexed
       if (config.getColumnsEnabledForColumnStatsIndex().isEmpty()) {
-        fieldsToIndex = writeSchemaWithMetaFields.getFields();
+        fieldsToIndex = tablePartitionWriteSchemaWithMetaFields.getFields();
       } else {
         Set<String> columnsToIndexSet = new HashSet<>(config.getColumnsEnabledForColumnStatsIndex());
 
-        fieldsToIndex = writeSchemaWithMetaFields.getFields().stream()
+        fieldsToIndex = tablePartitionWriteSchemaWithMetaFields.getFields().stream()
             .filter(field -> columnsToIndexSet.contains(field.name()))
             .collect(Collectors.toList());
       }
 
       List<IndexedRecord> indexedRecords = new LinkedList<>();
       for (HoodieRecord hoodieRecord : recordList) {
-        indexedRecords.add(hoodieRecord.toIndexedRecord(writeSchema, config.getProps()).get().getData());
+        indexedRecords.add(hoodieRecord.toIndexedRecord(tablePartitionWriteSchema, config.getProps()).get().getData());
       }
 
       Map<String, HoodieColumnRangeMetadata<Comparable>> columnRangesMetadataMap =
@@ -446,7 +447,7 @@ public class HoodieAppendHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
   protected void appendDataAndDeleteBlocks(Map<HeaderMetadataType, String> header, boolean appendDeleteBlocks) {
     try {
       header.put(HoodieLogBlock.HeaderMetadataType.INSTANT_TIME, instantTime);
-      header.put(HoodieLogBlock.HeaderMetadataType.SCHEMA, writeSchemaWithMetaFields.toString());
+      header.put(HoodieLogBlock.HeaderMetadataType.SCHEMA, tablePartitionWriteSchemaWithMetaFields.toString());
       List<HoodieLogBlock> blocks = new ArrayList<>(2);
       if (recordList.size() > 0) {
         String keyField = config.populateMetaFields()
@@ -564,12 +565,12 @@ public class HoodieAppendHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
       record.seal();
     }
     // fetch the ordering val first in case the record was deflated.
-    final Comparable<?> orderingVal = record.getOrderingValue(writeSchema, recordProperties);
+    final Comparable<?> orderingVal = record.getOrderingValue(tablePartitionWriteSchema, recordProperties);
     Option<HoodieRecord> indexedRecord = prepareRecord(record);
     if (indexedRecord.isPresent()) {
       // Skip the ignored record.
       try {
-        if (!indexedRecord.get().shouldIgnore(writeSchema, recordProperties)) {
+        if (!indexedRecord.get().shouldIgnore(tablePartitionWriteSchema, recordProperties)) {
           recordList.add(indexedRecord.get());
         }
       } catch (IOException e) {

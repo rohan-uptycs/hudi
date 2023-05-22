@@ -38,6 +38,8 @@ import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.internal.schema.InternalSchema;
 import org.apache.hudi.internal.schema.utils.SerDeHelper;
 import org.apache.hudi.io.IOUtils;
@@ -157,16 +159,24 @@ public abstract class HoodieCompactor<T, I, K, O> implements Serializable {
                                    TaskContextSupplier taskContextSupplier,
                                    CompactionExecutionHelper executionHelper) throws IOException {
     FileSystem fs = metaClient.getFs();
-    Schema readerSchema;
+    Schema readerStagingSchema;
     Option<InternalSchema> internalSchemaOption = Option.empty();
     if (!StringUtils.isNullOrEmpty(config.getInternalSchema())) {
-      readerSchema = new Schema.Parser().parse(config.getSchema());
+      readerStagingSchema = new Schema.Parser().parse(config.getSchema());
       internalSchemaOption = SerDeHelper.fromJson(config.getInternalSchema());
       // its safe to modify config here, since we running in task side.
       ((HoodieTable) compactionHandler).getConfig().setDefault(config);
     } else {
-      readerSchema = HoodieAvroUtils.addMetadataFields(
+      readerStagingSchema = HoodieAvroUtils.addMetadataFields(
           new Schema.Parser().parse(config.getSchema()), config.allowOperationMetadataField());
+    }
+    Schema readerSchema;
+    if (config.isVirtualPartioningEnabled()) {
+      PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
+      String tableName = partitionSchemaReader.getTableName(operation.getPartitionPath());
+      readerSchema = partitionSchemaReader.getPartitionSchema(tableName, readerStagingSchema);
+    } else {
+      readerSchema = readerStagingSchema;
     }
     LOG.info("Compaction operation started for base file: " + operation.getDataFileName() + " and delta files: " + operation.getDeltaFileNames()
         + " for commit " + instantTime);

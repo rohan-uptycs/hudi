@@ -194,7 +194,7 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
 
       // Create the writer for writing the new version file
       fileWriter = HoodieFileWriterFactory.getFileWriter(instantTime, newFilePath, hoodieTable.getHadoopConf(),
-          config, writeSchemaWithMetaFields, taskContextSupplier, recordMerger.getRecordType());
+          config, tablePartitionWriteSchemaWithMetaFields, taskContextSupplier, recordMerger.getRecordType());
     } catch (IOException io) {
       LOG.error("Error in update task at commit " + instantTime, io);
       writeStatus.setGlobalError(io);
@@ -276,7 +276,7 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
   }
 
   protected void writeInsertRecord(HoodieRecord<T> newRecord) throws IOException {
-    Schema schema = useWriterSchemaForCompaction ? writeSchemaWithMetaFields : writeSchema;
+    Schema schema = useWriterSchemaForCompaction ? tablePartitionWriteSchemaWithMetaFields : tablePartitionWriteSchema;
     // just skip the ignored record
     if (newRecord.shouldIgnore(schema, config.getProps())) {
       return;
@@ -327,8 +327,8 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
    * Go through an old record. Here if we detect a newer version shows up, we write the new one to the file.
    */
   public void write(HoodieRecord<T> oldRecord) {
-    Schema oldSchema = config.populateMetaFields() ? writeSchemaWithMetaFields : writeSchema;
-    Schema newSchema = useWriterSchemaForCompaction ? writeSchemaWithMetaFields : writeSchema;
+    Schema oldSchema = config.populateMetaFields() ? tablePartitionWriteSchemaWithMetaFields : tablePartitionWriteSchema;
+    Schema newSchema = useWriterSchemaForCompaction ? tablePartitionWriteSchemaWithMetaFields : tablePartitionWriteSchema;
     boolean copyOldRecord = true;
     String key = oldRecord.getRecordKey(oldSchema, keyGeneratorOpt);
     TypedProperties props = config.getPayloadConfig().getProps();
@@ -365,7 +365,7 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
         writeToFile(new HoodieKey(key, partitionPath), oldRecord, oldSchema, props, true);
       } catch (IOException | RuntimeException e) {
         String errMsg = String.format("Failed to merge old record into new file for key %s from old file %s to new file %s with writerSchema %s",
-                key, getOldFilePath(), newFilePath, writeSchemaWithMetaFields.toString(true));
+            key, getOldFilePath(), newFilePath, tablePartitionWriteSchemaWithMetaFields.toString(true));
         LOG.debug("Old record is " + oldRecord);
         throw new HoodieUpsertException(errMsg, e);
       }
@@ -377,13 +377,13 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
     // NOTE: `FILENAME_METADATA_FIELD` has to be rewritten to correctly point to the
     //       file holding this record even in cases when overall metadata is preserved
     MetadataValues metadataValues = new MetadataValues().setFileName(newFilePath.getName());
+    LOG.info("prepend metadata");
     HoodieRecord populatedRecord =
-        record.prependMetaFields(schema, writeSchemaWithMetaFields, metadataValues, prop);
-
+        record.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, prop);
     if (shouldPreserveRecordMetadata) {
-      fileWriter.write(key.getRecordKey(), populatedRecord, writeSchemaWithMetaFields);
+      fileWriter.write(key.getRecordKey(), populatedRecord, tablePartitionWriteSchemaWithMetaFields);
     } else {
-      fileWriter.writeWithMetadata(key, populatedRecord, writeSchemaWithMetaFields);
+      fileWriter.writeWithMetadata(key, populatedRecord, tablePartitionWriteSchemaWithMetaFields);
     }
   }
 

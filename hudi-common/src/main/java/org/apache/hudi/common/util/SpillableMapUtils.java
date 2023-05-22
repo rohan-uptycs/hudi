@@ -30,6 +30,8 @@ import org.apache.hudi.exception.HoodieCorruptedDataException;
 
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -41,6 +43,8 @@ import static org.apache.hudi.common.util.BinaryUtil.generateChecksum;
  * A utility class supports spillable map.
  */
 public class SpillableMapUtils {
+
+  private static final Logger LOG = LogManager.getLogger(SpillableMapUtils.class);
 
   /**
    * Using the schema and payload class, read and convert the bytes on disk to a HoodieRecord.
@@ -137,7 +141,7 @@ public class SpillableMapUtils {
     HoodieOperation operation = withOperationField
         ? HoodieOperation.fromName(getNullableValAsString(record, HoodieRecord.OPERATION_METADATA_FIELD)) : null;
     HoodieRecord<? extends HoodieRecordPayload> hoodieRecord = new HoodieAvroRecord<>(new HoodieKey(recKey, partitionPath),
-        HoodieRecordUtils.loadPayload(payloadClazz, new Object[]{record, preCombineVal}, GenericRecord.class,
+        HoodieRecordUtils.loadPayload(payloadClazz, new Object[] {record, preCombineVal}, GenericRecord.class,
             Comparable.class), operation);
 
     return (HoodieRecord<R>) hoodieRecord;

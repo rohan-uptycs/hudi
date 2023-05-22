@@ -19,10 +19,8 @@
 
 package org.apache.hudi.common.model;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Input;
-import com.esotericsoftware.kryo.io.Output;
 import org.apache.hudi.avro.HoodieAvroUtils;
+import org.apache.hudi.avro.MercifulJsonConverter;
 import org.apache.hudi.common.util.ConfigUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
@@ -30,9 +28,14 @@ import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.keygen.BaseKeyGenerator;
 
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.IndexedRecord;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Map;
@@ -46,6 +49,8 @@ import static org.apache.hudi.common.model.HoodieAvroIndexedRecord.updateMetadat
  * @param <T> payload implementation.
  */
 public class HoodieAvroRecord<T extends HoodieRecordPayload> extends HoodieRecord<T> {
+  private static final Logger LOG = LogManager.getLogger(HoodieAvroRecord.class);
+  private static MercifulJsonConverter jsonConverter = new MercifulJsonConverter();
 
   public HoodieAvroRecord(HoodieKey key, T data) {
     super(key, data);
@@ -132,6 +137,43 @@ public class HoodieAvroRecord<T extends HoodieRecordPayload> extends HoodieRecor
       GenericRecord newAvroRecord = HoodieAvroUtils.rewriteRecordWithNewSchema(avroRecordOpt.get(), targetSchema);
       updateMetadataValuesInternal(newAvroRecord, metadataValues);
       return new HoodieAvroRecord<>(getKey(), new RewriteAvroPayload(newAvroRecord), getOperation(), this.currentLocation, this.newLocation);
+    } catch (IOException e) {
+      throw new HoodieIOException("Failed to deserialize record!", e);
+    }
+  }
+
+  @Override
+  public HoodieRecord prependMetaFields(Schema recordSchema, Schema targetSchema, MetadataValues metadataValues, Properties props, boolean isdeltaCommit) {
+    try {
+      Option<IndexedRecord> recordWithOldSchemaOption = getData().getInsertValue(recordSchema, props);
+      if (isdeltaCommit) {
+        if (!recordWithOldSchemaOption.isPresent()) {
+          return null;
+        }
+        Schema.Field columnsField = recordSchema.getField("columns");
+        Object colsValue = recordWithOldSchemaOption.get().get(columnsField.pos());
+        recordWithOldSchemaOption.get().put(columnsField.pos(), null);
+        IndexedRecord oldRecord = recordWithOldSchemaOption.get();
+        Option<GenericRecord> newAvroRecordOption = Option.of(jsonConverter.convert(colsValue.toString(), targetSchema));
+        if (!newAvroRecordOption.isPresent()) {
+          return null;
+        }
+        GenericRecord newAvroRecord = newAvroRecordOption.get();
+        for (Schema.Field field : recordSchema.getFields()) {
+          if (field.name() != "columns") {
+            Schema.Field fieldFromTargetSchema = targetSchema.getField(field.name());
+            if (fieldFromTargetSchema != null) {
+              newAvroRecord.put(fieldFromTargetSchema.pos(), oldRecord.get(field.pos()));
+            }
+          }
+        }
+        updateMetadataValuesInternal(newAvroRecord, metadataValues);
+        return new HoodieAvroRecord<>(getKey(), new RewriteAvroPayload(newAvroRecord), getOperation(), this.currentLocation, this.newLocation);
+      } else {
+        GenericRecord newAvroRecord = HoodieAvroUtils.rewriteRecordWithNewSchema(recordWithOldSchemaOption.get(), targetSchema);
+        updateMetadataValuesInternal(newAvroRecord, metadataValues);
+        return new HoodieAvroRecord<>(getKey(), new RewriteAvroPayload(newAvroRecord), getOperation(), this.currentLocation, this.newLocation);
+      }
     } catch (IOException e) {
       throw new HoodieIOException("Failed to deserialize record!", e);
     }

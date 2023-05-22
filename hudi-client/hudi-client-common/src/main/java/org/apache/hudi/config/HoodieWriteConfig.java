@@ -127,6 +127,16 @@ public class HoodieWriteConfig extends HoodieConfig {
       .noDefaultValue()
       .withDocumentation("Table name that will be used for registering with metastores like HMS. Needs to be same across runs.");
 
+  public static final ConfigProperty<String> WRITE_METASTORE_URIS = ConfigProperty
+      .key("hoodie.datasource.metastore.uris")
+      .defaultValue("thrift://localhost:9083")
+      .withDocumentation("Hive metastore urls comma separated list");
+
+  public static final ConfigProperty<Boolean> USE_VIRTUAL_PARTITIONING = ConfigProperty
+      .key("hoodie.datasource.write.use.virtual.partitioning")
+      .defaultValue(true)
+      .withDocumentation("use partition wise schema");
+
   public static final ConfigProperty<String> PRECOMBINE_FIELD_NAME = ConfigProperty
       .key("hoodie.datasource.write.precombine.field")
       .defaultValue("ts")
@@ -1077,6 +1087,10 @@ public class HoodieWriteConfig extends HoodieConfig {
     return getBoolean(ENABLE_INTERNAL_SCHEMA_CACHE);
   }
 
+  public boolean isVirtualPartioningEnabled() {
+    return getBooleanOrDefault(USE_VIRTUAL_PARTITIONING);
+  }
+
   public void setInternalSchemaString(String internalSchemaString) {
     setValue(INTERNAL_SCHEMA_STRING, internalSchemaString);
   }
@@ -1112,6 +1126,10 @@ public class HoodieWriteConfig extends HoodieConfig {
 
   public String getPreCombineField() {
     return getString(PRECOMBINE_FIELD_NAME);
+  }
+
+  public String getMetastoreUris() {
+    return getStringOrDefault(WRITE_METASTORE_URIS);
   }
 
   public String getWritePayloadClass() {

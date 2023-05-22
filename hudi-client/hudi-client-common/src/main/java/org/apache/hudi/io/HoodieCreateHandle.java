@@ -18,8 +18,6 @@
 
 package org.apache.hudi.io;
 
-import org.apache.avro.Schema;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.engine.TaskContextSupplier;
@@ -38,6 +36,9 @@ import org.apache.hudi.exception.HoodieInsertException;
 import org.apache.hudi.io.storage.HoodieFileWriter;
 import org.apache.hudi.io.storage.HoodieFileWriterFactory;
 import org.apache.hudi.table.HoodieTable;
+
+import org.apache.avro.Schema;
+import org.apache.hadoop.fs.Path;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
@@ -101,7 +102,7 @@ public class HoodieCreateHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
       partitionMetadata.trySave(getPartitionId());
       createMarkerFile(partitionPath, FSUtils.makeBaseFileName(this.instantTime, this.writeToken, this.fileId, hoodieTable.getBaseFileExtension()));
       this.fileWriter = HoodieFileWriterFactory.getFileWriter(instantTime, path, hoodieTable.getHadoopConf(), config,
-        writeSchemaWithMetaFields, this.taskContextSupplier, config.getRecordMerger().getRecordType());
+          tablePartitionWriteSchemaWithMetaFields, this.taskContextSupplier, config.getRecordMerger().getRecordType());
     } catch (IOException e) {
       throw new HoodieInsertException("Failed to initialize HoodieStorageWriter for path " + path, e);
     }
@@ -132,19 +133,18 @@ public class HoodieCreateHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
   protected void doWrite(HoodieRecord record, Schema schema, TypedProperties props) {
     Option<Map<String, String>> recordMetadata = record.getMetadata();
     try {
-      if (!HoodieOperation.isDelete(record.getOperation()) && !record.isDelete(schema, config.getProps())) {
-        if (record.shouldIgnore(schema, config.getProps())) {
+      if (!HoodieOperation.isDelete(record.getOperation()) && !record.isDelete(tablePartitionWriteSchema, config.getProps())) {
+        if (record.shouldIgnore(tablePartitionWriteSchema, config.getProps())) {
           return;
         }
-
         MetadataValues metadataValues = new MetadataValues().setFileName(path.getName());
         HoodieRecord populatedRecord =
-            record.prependMetaFields(schema, writeSchemaWithMetaFields, metadataValues, config.getProps());
+            record.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, config.getProps());
 
         if (preserveMetadata) {
-          fileWriter.write(record.getRecordKey(), populatedRecord, writeSchemaWithMetaFields);
+          fileWriter.write(record.getRecordKey(), populatedRecord, tablePartitionWriteSchemaWithMetaFields);
         } else {
-          fileWriter.writeWithMetadata(record.getKey(), populatedRecord, writeSchemaWithMetaFields);
+          fileWriter.writeWithMetadata(record.getKey(), populatedRecord, tablePartitionWriteSchemaWithMetaFields);
         }
 
         // Update the new location of record, so we know where to find it next
@@ -184,7 +184,7 @@ public class HoodieCreateHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
     while (keyIterator.hasNext()) {
       final String key = keyIterator.next();
       HoodieRecord<T> record = recordMap.get(key);
-      write(record, useWriterSchema ? writeSchemaWithMetaFields : writeSchema, config.getProps());
+      write(record, useWriterSchema ? tablePartitionWriteSchemaWithMetaFields : tablePartitionWriteSchema, config.getProps());
     }
   }
 

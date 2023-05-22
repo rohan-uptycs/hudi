@@ -52,6 +52,8 @@ import org.apache.hudi.execution.bulkinsert.RDDCustomColumnsSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RDDSpatialCurveSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RowCustomColumnsSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RowSpatialCurveSortPartitioner;
+import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.io.IOUtils;
 import org.apache.hudi.io.storage.HoodieFileReader;
 import org.apache.hudi.io.storage.HoodieFileReaderFactory;
@@ -281,11 +283,17 @@ public abstract class MultipleSparkJobExecutionStrategy<T>
         LOG.info("MaxMemoryPerCompaction run as part of clustering => " + maxMemoryPerCompaction);
         try {
           Schema readerSchema = HoodieAvroUtils.addMetadataFields(new Schema.Parser().parse(config.getSchema()));
+          Schema partitionReaderSchema = readerSchema;
+          if (config.isVirtualPartioningEnabled()) {
+            PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
+            String tableName = partitionSchemaReader.getTableName(clusteringOp.getPartitionPath());
+            partitionReaderSchema = partitionSchemaReader.getPartitionSchema(tableName, readerSchema);
+          }
           HoodieMergedLogRecordScanner scanner = HoodieMergedLogRecordScanner.newBuilder()
               .withFileSystem(table.getMetaClient().getFs())
               .withBasePath(table.getMetaClient().getBasePath())
               .withLogFilePaths(clusteringOp.getDeltaFilePaths())
-              .withReaderSchema(readerSchema)
+              .withReaderSchema(partitionReaderSchema)
               .withLatestInstantTime(instantTime)
               .withMaxMemorySizeInBytes(maxMemoryPerCompaction)
               .withReadBlocksLazily(config.getCompactionLazyBlockReadEnabled())
@@ -303,7 +311,7 @@ public abstract class MultipleSparkJobExecutionStrategy<T>
               ? Option.empty()
               : Option.of(HoodieFileReaderFactory.getReaderFactory(recordType).getFileReader(table.getHadoopConf(), new Path(clusteringOp.getDataFilePath())));
           HoodieTableConfig tableConfig = table.getMetaClient().getTableConfig();
-          recordIterators.add(getFileSliceReader(baseFileReader, scanner, readerSchema,
+          recordIterators.add(getFileSliceReader(baseFileReader, scanner, partitionReaderSchema,
               tableConfig.getProps(),
               tableConfig.populateMetaFields() ? Option.empty() : Option.of(Pair.of(tableConfig.getRecordKeyFieldProp(),
                   tableConfig.getPartitionFieldProp()))));

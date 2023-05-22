@@ -37,6 +37,8 @@ import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
+import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.table.HoodieTable;
 import org.apache.hudi.table.marker.WriteMarkersFactory;
 
@@ -51,6 +53,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.hudi.common.util.StringUtils.EMPTY_STRING;
 import static org.apache.hudi.common.util.StringUtils.isNullOrEmpty;
 
 /**
@@ -65,6 +68,9 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
    */
   protected final Schema writeSchema;
   protected final Schema writeSchemaWithMetaFields;
+  protected Schema tablePartitionWriteSchemaWithMetaFields;
+  protected Schema tablePartitionWriteSchema;
+
   protected final HoodieRecordMerger recordMerger;
 
   protected HoodieTimer timer;
@@ -97,6 +103,14 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
     this.writeToken = makeWriteToken();
     this.schemaOnReadEnabled = !isNullOrEmpty(hoodieTable.getConfig().getInternalSchema());
     this.recordMerger = config.getRecordMerger();
+    PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
+    String tableName = partitionSchemaReader.getTableName(partitionPath);
+    tablePartitionWriteSchemaWithMetaFields = writeSchemaWithMetaFields;
+    tablePartitionWriteSchema = writeSchema;
+    if (!tableName.equals(EMPTY_STRING) && config.isVirtualPartioningEnabled()) {
+      tablePartitionWriteSchemaWithMetaFields = partitionSchemaReader.getPartitionSchema(tableName, writeSchemaWithMetaFields);
+      tablePartitionWriteSchema = partitionSchemaReader.getPartitionSchema(tableName, writeSchema);
+    }
   }
 
   /**
@@ -140,11 +154,11 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
   }
 
   public Schema getWriterSchemaWithMetaFields() {
-    return writeSchemaWithMetaFields;
+    return tablePartitionWriteSchemaWithMetaFields;
   }
 
   public Schema getWriterSchema() {
-    return writeSchema;
+    return tablePartitionWriteSchema;
   }
 
   /**
