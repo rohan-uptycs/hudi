@@ -52,7 +52,7 @@ import org.apache.hudi.execution.bulkinsert.RDDCustomColumnsSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RDDSpatialCurveSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RowCustomColumnsSortPartitioner;
 import org.apache.hudi.execution.bulkinsert.RowSpatialCurveSortPartitioner;
-import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.HiveMetastoreFactory;
 import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.io.IOUtils;
 import org.apache.hudi.io.storage.HoodieFileReader;
@@ -285,7 +285,7 @@ public abstract class MultipleSparkJobExecutionStrategy<T>
           Schema readerSchema = HoodieAvroUtils.addMetadataFields(new Schema.Parser().parse(config.getSchema()));
           Schema partitionReaderSchema = readerSchema;
           if (config.isVirtualPartioningEnabled()) {
-            PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
+            PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(config.getMetastoreUris());
             String tableName = partitionSchemaReader.getTableName(clusteringOp.getPartitionPath());
             partitionReaderSchema = partitionSchemaReader.getPartitionSchema(tableName, readerSchema);
           }

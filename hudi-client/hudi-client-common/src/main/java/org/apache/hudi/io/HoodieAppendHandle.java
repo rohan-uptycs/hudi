@@ -249,8 +249,8 @@ public class HoodieAppendHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O
 
         // Prepend meta-fields into the record
         MetadataValues metadataValues = populateMetadataFields(finalRecord);
-        HoodieRecord populatedRecord =
-            finalRecord.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, recordProperties, true);
+        HoodieRecord populatedRecord = useVirtualPartitioning ? finalRecord.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, recordProperties, true) :
+                finalRecord.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, recordProperties);
 
         // NOTE: Record have to be cloned here to make sure if it holds low-level engine-specific
         //       payload pointing into a shared, mutable (underlying) buffer we get a clean copy of

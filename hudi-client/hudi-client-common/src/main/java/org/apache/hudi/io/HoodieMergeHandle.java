@@ -377,7 +377,6 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
     // NOTE: `FILENAME_METADATA_FIELD` has to be rewritten to correctly point to the
     //       file holding this record even in cases when overall metadata is preserved
     MetadataValues metadataValues = new MetadataValues().setFileName(newFilePath.getName());
-    LOG.info("prepend metadata");
     HoodieRecord populatedRecord =
         record.prependMetaFields(schema, tablePartitionWriteSchemaWithMetaFields, metadataValues, prop);
     if (shouldPreserveRecordMetadata) {

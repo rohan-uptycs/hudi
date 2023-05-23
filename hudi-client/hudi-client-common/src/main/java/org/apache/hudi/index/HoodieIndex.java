@@ -132,6 +132,15 @@ public abstract class HoodieIndex<I, O> implements Serializable {
   @PublicAPIMethod(maturity = ApiMaturityLevel.STABLE)
   public abstract boolean isImplicitWithStorage();
 
+  /***
+   * Post commit index metadata
+   * @param table
+   * @param hoodieInstant
+   */
+  public void commitIndexMetadataIfNeeded(HoodieTable table, String hoodieInstant) {
+
+  }
+
   /**
    * To indicate if an operation type requires location tagging before writing
    */

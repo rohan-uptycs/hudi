@@ -37,7 +37,7 @@ import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
-import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.HiveMetastoreFactory;
 import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.table.HoodieTable;
 import org.apache.hudi.table.marker.WriteMarkersFactory;
@@ -68,19 +68,18 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
    */
   protected final Schema writeSchema;
   protected final Schema writeSchemaWithMetaFields;
-  protected Schema tablePartitionWriteSchemaWithMetaFields;
-  protected Schema tablePartitionWriteSchema;
-
   protected final HoodieRecordMerger recordMerger;
-
-  protected HoodieTimer timer;
-  protected WriteStatus writeStatus;
   protected final String partitionPath;
   protected final String fileId;
   protected final String writeToken;
   protected final TaskContextSupplier taskContextSupplier;
   // For full schema evolution
   protected final boolean schemaOnReadEnabled;
+  protected Schema tablePartitionWriteSchemaWithMetaFields;
+  protected Boolean useVirtualPartitioning;
+  protected Schema tablePartitionWriteSchema;
+  protected HoodieTimer timer;
+  protected WriteStatus writeStatus;
 
   public HoodieWriteHandle(HoodieWriteConfig config, String instantTime, String partitionPath,
                            String fileId, HoodieTable<T, I, K, O> hoodieTable, TaskContextSupplier taskContextSupplier) {
@@ -103,13 +102,29 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
     this.writeToken = makeWriteToken();
     this.schemaOnReadEnabled = !isNullOrEmpty(hoodieTable.getConfig().getInternalSchema());
     this.recordMerger = config.getRecordMerger();
-    PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
-    String tableName = partitionSchemaReader.getTableName(partitionPath);
     tablePartitionWriteSchemaWithMetaFields = writeSchemaWithMetaFields;
     tablePartitionWriteSchema = writeSchema;
-    if (!tableName.equals(EMPTY_STRING) && config.isVirtualPartioningEnabled()) {
-      tablePartitionWriteSchemaWithMetaFields = partitionSchemaReader.getPartitionSchema(tableName, writeSchemaWithMetaFields);
-      tablePartitionWriteSchema = partitionSchemaReader.getPartitionSchema(tableName, writeSchema);
+    useVirtualPartitioning = config.isVirtualPartioningEnabled();
+    if (config.isVirtualPartioningEnabled()) {
+      PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(config.getMetastoreUris());
+      String tableName = partitionSchemaReader.getTableName(partitionPath);
+      if (!tableName.equals(EMPTY_STRING)) {
+        tablePartitionWriteSchemaWithMetaFields = partitionSchemaReader.getPartitionSchema(tableName, writeSchemaWithMetaFields);
+        tablePartitionWriteSchema = partitionSchemaReader.getPartitionSchema(tableName, writeSchema);
+      }
+    }
+  }
+
+  private static Schema getWriteSchema(HoodieWriteConfig config) {
+    return new Schema.Parser().parse(config.getWriteSchema());
+  }
+
+  protected static Option<IndexedRecord> toAvroRecord(HoodieRecord record, Schema writerSchema, TypedProperties props) {
+    try {
+      return record.toIndexedRecord(writerSchema, props).map(HoodieAvroIndexedRecord::getData);
+    } catch (IOException e) {
+      LOG.error("Fail to get indexRecord from " + record, e);
+      return Option.empty();
     }
   }
 
@@ -213,7 +228,7 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
   public HoodieTableMetaClient getHoodieTableMetaClient() {
     return hoodieTable.getMetaClient();
   }
-  
+
   public String getFileId() {
     return this.fileId;
   }
@@ -228,10 +243,6 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
 
   protected long getAttemptId() {
     return taskContextSupplier.getAttemptIdSupplier().get();
-  }
-
-  private static Schema getWriteSchema(HoodieWriteConfig config) {
-    return new Schema.Parser().parse(config.getWriteSchema());
   }
 
   protected HoodieLogFormat.Writer createLogWriter(
@@ -261,20 +272,11 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
 
   protected HoodieLogFormat.Writer createLogWriter(String baseCommitTime, String fileSuffix) {
     try {
-      return createLogWriter(Option.empty(),baseCommitTime, fileSuffix);
+      return createLogWriter(Option.empty(), baseCommitTime, fileSuffix);
     } catch (IOException e) {
       throw new HoodieException("Creating logger writer with fileId: " + fileId + ", "
           + "base commit time: " + baseCommitTime + ", "
           + "file suffix: " + fileSuffix + " error");
-    }
-  }
-
-  protected static Option<IndexedRecord> toAvroRecord(HoodieRecord record, Schema writerSchema, TypedProperties props) {
-    try {
-      return record.toIndexedRecord(writerSchema, props).map(HoodieAvroIndexedRecord::getData);
-    } catch (IOException e) {
-      LOG.error("Fail to get indexRecord from " + record, e);
-      return Option.empty();
     }
   }
 }

@@ -38,7 +38,7 @@ import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.config.HoodieWriteConfig;
-import org.apache.hudi.hms.HiveMetastorePartitionReaderImpl;
+import org.apache.hudi.hms.HiveMetastoreFactory;
 import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.internal.schema.InternalSchema;
 import org.apache.hudi.internal.schema.utils.SerDeHelper;
@@ -172,7 +172,7 @@ public abstract class HoodieCompactor<T, I, K, O> implements Serializable {
     }
     Schema readerSchema;
     if (config.isVirtualPartioningEnabled()) {
-      PartitionSchemaReader partitionSchemaReader = new HiveMetastorePartitionReaderImpl.HiveMetaStoreBuilder().withMetastoreUrls(config.getMetastoreUris()).build();
+      PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(config.getMetastoreUris());
       String tableName = partitionSchemaReader.getTableName(operation.getPartitionPath());
       readerSchema = partitionSchemaReader.getPartitionSchema(tableName, readerStagingSchema);
     } else {

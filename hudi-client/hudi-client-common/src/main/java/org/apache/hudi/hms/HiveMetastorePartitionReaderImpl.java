@@ -60,7 +60,7 @@ public class HiveMetastorePartitionReaderImpl implements PartitionSchemaReader, 
     }
   });
 
-  private HiveMetastorePartitionReaderImpl(String metastoreUris) {
+  protected HiveMetastorePartitionReaderImpl(String metastoreUris) {
     hiveMetaStoreClient = initClient(metastoreUris);
     schemaCache = Caffeine.newBuilder().maximumSize(10000).build();
   }
@@ -136,28 +136,5 @@ public class HiveMetastorePartitionReaderImpl implements PartitionSchemaReader, 
       return schemaMapping.get(type);
     }
     return Schema.Type.STRING;
-  }
-
-  public static class HiveMetaStoreBuilder {
-    private String metastoreUris;
-    private HiveMetastorePartitionReaderImpl hiveMetastorePartitionReader;
-
-    public HiveMetaStoreBuilder withMetastoreUrls(String urls) {
-      this.metastoreUris = urls;
-      return this;
-    }
-
-    public HiveMetastorePartitionReaderImpl build() {
-      if (hiveMetastorePartitionReader == null) {
-        synchronized (HiveMetaStoreBuilder.class) {
-          if (hiveMetastorePartitionReader != null) {
-            return hiveMetastorePartitionReader;
-          }
-          hiveMetastorePartitionReader = new HiveMetastorePartitionReaderImpl(metastoreUris);
-          return hiveMetastorePartitionReader;
-        }
-      }
-      return hiveMetastorePartitionReader;
-    }
   }
 }
