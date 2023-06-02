@@ -103,10 +103,13 @@ public class MercifulJsonConverter {
 
   private static GenericRecord convertJsonToAvro(Map<String, Object> inputJson, Schema schema) {
     GenericRecord avroRecord = new GenericData.Record(schema);
-    for (Schema.Field f : schema.getFields()) {
-      Object val = inputJson.get(f.name());
-      if (val != null) {
-        avroRecord.put(f.pos(), convertJsonToAvroField(val, f.name(), f.schema()));
+    for (String key : inputJson.keySet()) {
+      Schema.Field f = schema.getField(key);
+      if (f != null) {
+        Object val = inputJson.get(key);
+        if (val != null) {
+          avroRecord.put(f.pos(), convertJsonToAvroField(val, f.name(), f.schema()));
+        }
       }
     }
     return avroRecord;
@@ -179,7 +182,13 @@ public class MercifulJsonConverter {
         if (value instanceof Number) {
           return Pair.of(true, ((Number) value).intValue());
         } else if (value instanceof String) {
-          return Pair.of(true, Integer.valueOf((String) value));
+          try {
+            Integer fieldValue = Integer.valueOf((String) value);
+            return Pair.of(true, fieldValue);
+          } catch (NumberFormatException numberFormatException) {
+            LOG.info("number format exception occured for " + name + " value " + value);
+            return Pair.of(false, null);
+          }
         }
         return Pair.of(false, null);
       }
@@ -193,7 +202,14 @@ public class MercifulJsonConverter {
         if (value instanceof Number) {
           return Pair.of(true, ((Number) value).doubleValue());
         } else if (value instanceof String) {
-          return Pair.of(true, Double.valueOf((String) value));
+          try {
+            Double fieldValue = Double.valueOf((String) value);
+            return Pair.of(true, fieldValue);
+          } catch (NumberFormatException numberFormatException) {
+            LOG.info("number format exception occured for " + name + " value " + value);
+            return Pair.of(false, null);
+          }
+
         }
         return Pair.of(false, null);
       }
@@ -207,7 +223,14 @@ public class MercifulJsonConverter {
         if (value instanceof Number) {
           return Pair.of(true, ((Number) value).floatValue());
         } else if (value instanceof String) {
-          return Pair.of(true, Float.valueOf((String) value));
+          try {
+            Float fieldValue = Float.valueOf((String) value);
+            return Pair.of(true, fieldValue);
+          } catch (NumberFormatException numberFormatException) {
+            LOG.info("number format exception occured for " + name + " value " + value);
+            return Pair.of(false, null);
+          }
+
         }
         return Pair.of(false, null);
       }
@@ -221,7 +244,13 @@ public class MercifulJsonConverter {
         if (value instanceof Number) {
           return Pair.of(true, ((Number) value).longValue());
         } else if (value instanceof String) {
-          return Pair.of(true, Long.valueOf((String) value));
+          try {
+            Long fieldValue = Long.valueOf((String) value);
+            return Pair.of(true, fieldValue);
+          } catch (NumberFormatException numberFormatException) {
+            LOG.info("number format exception occured for " + name + " value " + value);
+            return Pair.of(false, null);
+          }
         }
         return Pair.of(false, null);
       }

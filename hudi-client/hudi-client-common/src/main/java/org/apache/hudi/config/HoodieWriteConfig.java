@@ -137,6 +137,12 @@ public class HoodieWriteConfig extends HoodieConfig {
       .defaultValue(true)
       .withDocumentation("use partition wise schema");
 
+  public static final ConfigProperty<String> PARTITION_TABLE_NAME = ConfigProperty
+      .key("hoodie.datasource.partition.table.name")
+      .noDefaultValue()
+      .withDocumentation("use partition table name");
+
+
   public static final ConfigProperty<String> PRECOMBINE_FIELD_NAME = ConfigProperty
       .key("hoodie.datasource.write.precombine.field")
       .defaultValue("ts")
@@ -1043,6 +1049,10 @@ public class HoodieWriteConfig extends HoodieConfig {
    */
   public String getBasePath() {
     return getString(BASE_PATH);
+  }
+
+  public String getPartitionTableName() {
+    return getString(PARTITION_TABLE_NAME);
   }
 
   public HoodieRecordMerger getRecordMerger() {

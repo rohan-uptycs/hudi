@@ -25,11 +25,15 @@ import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.util.queue.HoodieExecutor;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
+import org.apache.hudi.hms.HiveMetastoreFactory;
+import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.io.WriteHandleFactory;
 import org.apache.hudi.table.HoodieTable;
+import org.apache.hudi.util.ExecutorFactory;
 
 import org.apache.avro.Schema;
-import org.apache.hudi.util.ExecutorFactory;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 import java.util.Iterator;
 import java.util.List;
@@ -37,8 +41,10 @@ import java.util.List;
 import static org.apache.hudi.common.util.ValidationUtils.checkState;
 
 public class SparkLazyInsertIterable<T> extends HoodieLazyInsertIterable<T> {
-
+  private static final Logger LOG = LogManager.getLogger(SparkLazyInsertIterable.class);
   private final boolean useWriterSchema;
+
+  private final String partitionTableName;
 
   public SparkLazyInsertIterable(Iterator<HoodieRecord<T>> recordItr,
                                  boolean areRecordsSorted,
@@ -62,6 +68,7 @@ public class SparkLazyInsertIterable<T> extends HoodieLazyInsertIterable<T> {
                                  WriteHandleFactory writeHandleFactory) {
     super(recordItr, areRecordsSorted, config, instantTime, hoodieTable, idPrefix, taskContextSupplier, writeHandleFactory);
     this.useWriterSchema = useWriterSchema;
+    this.partitionTableName = config.getPartitionTableName();
   }
 
   @Override
@@ -73,7 +80,12 @@ public class SparkLazyInsertIterable<T> extends HoodieLazyInsertIterable<T> {
       if (useWriterSchema) {
         schema = HoodieAvroUtils.addMetadataFields(schema);
       }
-
+      String partitionTableName = hoodieConfig.getPartitionTableName();
+      LOG.warn("table name is " + partitionTableName);
+      if (partitionTableName != null || partitionTableName != "") {
+        PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(hoodieConfig.getMetastoreUris());
+        schema = partitionSchemaReader.getPartitionSchema(partitionTableName, schema);
+      }
       bufferedIteratorExecutor = ExecutorFactory.create(hoodieConfig, inputItr, getInsertHandler(),
           getTransformer(schema, hoodieConfig), hoodieTable.getPreExecuteRunnable());
 

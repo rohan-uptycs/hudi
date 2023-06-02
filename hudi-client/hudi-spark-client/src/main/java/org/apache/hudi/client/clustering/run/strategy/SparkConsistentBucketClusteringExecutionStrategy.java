@@ -29,6 +29,8 @@ import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieClusteringException;
 import org.apache.hudi.execution.bulkinsert.RDDConsistentBucketPartitioner;
+import org.apache.hudi.hms.HiveMetastoreFactory;
+import org.apache.hudi.hms.PartitionSchemaReader;
 import org.apache.hudi.table.HoodieTable;
 import org.apache.hudi.table.action.commit.SparkBulkInsertHelper;
 
@@ -72,10 +74,11 @@ public class SparkConsistentBucketClusteringExecutionStrategy<T extends HoodieRe
                                                                  Map<String, String> strategyParams, Schema schema, List<HoodieFileGroupId> fileGroupIdList,
                                                                  boolean preserveHoodieMetadata, Map<String, String> extraMetadata) {
 
-    LOG.info("Starting clustering for a group, parallelism:" + numOutputGroups + " commit:" + instantTime);
+    LOG.warn("Starting clustering for a group, parallelism:" + numOutputGroups + " commit:" + instantTime);
     Properties props = getWriteConfig().getProps();
     // We are calling another action executor - disable auto commit. Strategy is only expected to write data in new files.
     props.put(HoodieWriteConfig.AUTO_COMMIT_ENABLE.key(), Boolean.FALSE.toString());
+    props.put(HoodieWriteConfig.PARTITION_TABLE_NAME.key(), getTableName(fileGroupIdList));
     HoodieWriteConfig newConfig = HoodieWriteConfig.newBuilder().withProps(props).build();
 
     RDDConsistentBucketPartitioner<T> partitioner = new RDDConsistentBucketPartitioner<>(getHoodieTable(), strategyParams, preserveHoodieMetadata);
@@ -89,5 +92,22 @@ public class SparkConsistentBucketClusteringExecutionStrategy<T extends HoodieRe
 
     return (HoodieData<WriteStatus>) SparkBulkInsertHelper.newInstance()
         .bulkInsert(inputRecords, instantTime, getHoodieTable(), newConfig, false, partitioner, true, numOutputGroups);
+  }
+
+  private String getTableName(List<HoodieFileGroupId> fileGroupIdList) {
+    String partitionPath = getPartitionPath(fileGroupIdList);
+    PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(getWriteConfig().getMetastoreUris());
+    String tableName = partitionSchemaReader.getTableName(partitionPath);
+    return tableName;
+  }
+
+  private String getPartitionPath(List<HoodieFileGroupId> fileGroupIdList) {
+    String partitionPath = "";
+    for (HoodieFileGroupId hoodieFileGroupId : fileGroupIdList) {
+      if (!hoodieFileGroupId.getPartitionPath().isEmpty()) {
+        return hoodieFileGroupId.getPartitionPath();
+      }
+    }
+    return partitionPath;
   }
 }

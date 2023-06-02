@@ -235,6 +235,7 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
         String timestamp = HoodieConsistentHashingMetadata.getTimestampFromFile(path.getName());
         if (maxCommitMetaFileTs != null && timestamp.compareTo(maxCommitMetaFileTs) <= 0) {
           // only fix the metadata with greater timestamp than max committed timestamp
+          fixed.add(hashingMetaFile);
           return;
         }
         boolean isRehashingCommitted = completedCommits.containsInstant(timestamp) || timestamp.equals(HoodieTimeline.INIT_INSTANT_TS);
