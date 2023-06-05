@@ -141,6 +141,9 @@ public abstract class HoodieIndex<I, O> implements Serializable {
 
   }
 
+  public void rollbackIndex(HoodieTable table, String hoodieInstant) {
+  }
+
   /**
    * To indicate if an operation type requires location tagging before writing
    */

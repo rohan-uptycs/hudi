@@ -155,6 +155,36 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
     return true;
   }
 
+  /***
+   * rollback index metadata generated at instant time t
+   * @param table
+   * @param hoodieInstant
+   */
+  public void rollbackIndex(HoodieTable table, String hoodieInstant) {
+    Option<Pair<HoodieInstant, HoodieClusteringPlan>> instantPlanPair =
+        ClusteringUtils.getClusteringPlan(table.getMetaClient(), HoodieTimeline.getReplaceCommitRequestedInstant(hoodieInstant));
+    if (!instantPlanPair.isPresent()) {
+      return;
+    }
+    HoodieClusteringPlan plan = instantPlanPair.get().getRight();
+    List<Map<String, String>> partitionMapList = plan.getInputGroups().stream().map(HoodieClusteringGroup::getExtraMetadata).collect(Collectors.toList());
+    partitionMapList.forEach(partitionMap -> {
+      String partition = partitionMap.get(SparkConsistentBucketClusteringPlanStrategy.METADATA_PARTITION_KEY);
+      Path metadataPartitionPath = FSUtils.getPartitionPath(table.getMetaClient().getHashingMetadataPath(), partition);
+      Path metadataFilePath = new Path(metadataPartitionPath, hoodieInstant + HASHING_METADATA_FILE_SUFFIX);
+      Path commitPath = new Path(metadataPartitionPath, hoodieInstant + HASHING_METADATA_COMMIT_FILE_SUFFIX);
+      try {
+        if (table.getMetaClient().getFs().exists(metadataFilePath)) {
+          table.getMetaClient().getFs().delete(metadataFilePath);
+          table.getMetaClient().getFs().delete(commitPath);
+        }
+      } catch (IOException e) {
+        throw new HoodieIOException("exception while rolling back index metadata and commit files " + metadataFilePath, e);
+      }
+    });
+    return;
+  }
+
   @Override
   protected BucketIndexLocationMapper getLocationMapper(HoodieTable table, List<String> partitionPath) {
     return new ConsistentBucketIndexLocationMapper(table, partitionPath);

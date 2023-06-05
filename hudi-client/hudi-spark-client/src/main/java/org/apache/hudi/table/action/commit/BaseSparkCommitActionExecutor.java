@@ -118,6 +118,25 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
     if (fileGroupsInPendingClustering.isEmpty()) {
       return inputRecords;
     }
+    if (config.isRollbackPendingClustering()) {
+      Map<String, Boolean> rollbackmp = new HashMap<>();
+      Set<HoodieInstant> pendingClusteringInstantsToRollback = getAllFileGroupsInPendingClusteringPlans(table.getMetaClient()).entrySet().stream()
+          .map(Map.Entry::getValue)
+          .collect(Collectors.toSet());
+      pendingClusteringInstantsToRollback.forEach(instant -> {
+        if (!rollbackmp.containsKey(instant.getTimestamp())) {
+          LOG.info("rollback started for instant " + instant.getTimestamp());
+          String commitTime = HoodieActiveTimeline.createNewInstantTime();
+          table.getIndex().rollbackIndex(table, instant.getTimestamp());
+          table.scheduleRollback(context, commitTime, instant, false, config.shouldRollbackUsingMarkers());
+          table.rollback(context, commitTime, instant, true, true);
+          table.getMetaClient().reloadActiveTimeline();
+          rollbackmp.put(instant.getTimestamp(), true);
+          LOG.info("rollback done for instant " + instant.getTimestamp());
+        }
+      });
+      return inputRecords;
+    }
 
     UpdateStrategy<T, HoodieData<HoodieRecord<T>>> updateStrategy = (UpdateStrategy<T, HoodieData<HoodieRecord<T>>>) ReflectionUtils
         .loadClass(config.getClusteringUpdatesStrategyClass(), new Class<?>[] {HoodieEngineContext.class, HoodieTable.class, Set.class},
@@ -130,18 +149,6 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
     }
     // there are file groups pending clustering and receiving updates, so rollback the pending clustering instants
     // there could be race condition, for example, if the clustering completes after instants are fetched but before rollback completed
-    if (config.isRollbackPendingClustering()) {
-      Set<HoodieInstant> pendingClusteringInstantsToRollback = getAllFileGroupsInPendingClusteringPlans(table.getMetaClient()).entrySet().stream()
-          .filter(e -> fileGroupsWithUpdatesAndPendingClustering.contains(e.getKey()))
-          .map(Map.Entry::getValue)
-          .collect(Collectors.toSet());
-      pendingClusteringInstantsToRollback.forEach(instant -> {
-        String commitTime = HoodieActiveTimeline.createNewInstantTime();
-        table.scheduleRollback(context, commitTime, instant, false, config.shouldRollbackUsingMarkers());
-        table.rollback(context, commitTime, instant, true, true);
-      });
-      table.getMetaClient().reloadActiveTimeline();
-    }
     return recordsAndPendingClusteringFileGroups.getLeft();
   }
 
