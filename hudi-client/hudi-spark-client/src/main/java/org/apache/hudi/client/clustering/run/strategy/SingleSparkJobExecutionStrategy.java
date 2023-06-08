@@ -20,6 +20,7 @@ package org.apache.hudi.client.clustering.run.strategy;
 
 import org.apache.hudi.avro.HoodieAvroUtils;
 import org.apache.hudi.avro.model.HoodieClusteringPlan;
+import org.apache.hudi.client.SparkTaskContextSupplier;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.client.common.HoodieSparkEngineContext;
 import org.apache.hudi.client.utils.ConcatenatingIterator;
@@ -32,12 +33,19 @@ import org.apache.hudi.common.model.ClusteringOperation;
 import org.apache.hudi.common.model.HoodieFileGroupId;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieRecord;
+import org.apache.hudi.common.table.HoodieTableConfig;
+import org.apache.hudi.common.table.log.HoodieMergedLogRecordScanner;
 import org.apache.hudi.common.util.ClosableIterator;
 import org.apache.hudi.common.util.MappingIterator;
 import org.apache.hudi.common.util.Option;
+import org.apache.hudi.common.util.StringUtils;
+import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.data.HoodieJavaRDD;
 import org.apache.hudi.exception.HoodieClusteringException;
+import org.apache.hudi.hms.HiveMetastoreFactory;
+import org.apache.hudi.hms.PartitionSchemaReader;
+import org.apache.hudi.io.IOUtils;
 import org.apache.hudi.io.storage.HoodieFileReader;
 import org.apache.hudi.io.storage.HoodieFileReaderFactory;
 import org.apache.hudi.keygen.BaseKeyGenerator;
@@ -63,6 +71,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
+import static org.apache.hudi.common.table.log.HoodieFileSliceReader.getFileSliceReader;
 
 /**
  * Clustering strategy to submit single spark jobs.
@@ -117,9 +127,9 @@ public abstract class SingleSparkJobExecutionStrategy<T>
         .map(op -> new HoodieFileGroupId(op.getPartitionPath(), op.getFileId()))
         .collect(Collectors.toList());
 
-    Iterator<HoodieRecord<T>> inputRecords = readRecordsForGroupBaseFiles(clusteringOps.getOperations());
+    Iterator<HoodieRecord<T>> inputRecords = readRecordsForGroup(clusteringOps.getOperations(), instantTime);
     Iterator<List<WriteStatus>> writeStatuses = performClusteringWithRecordsIterator(inputRecords, clusteringOps.getNumOutputGroups(), instantTime,
-        strategyParams, schema.get(), inputFileIds, preserveHoodieMetadata, taskContextSupplier);
+        strategyParams, schema.get(), inputFileIds, preserveHoodieMetadata, taskContextSupplier, clusteringOps);
 
     Iterable<List<WriteStatus>> writeStatusIterable = () -> writeStatuses;
     return StreamSupport.stream(writeStatusIterable.spliterator(), false)
@@ -137,13 +147,22 @@ public abstract class SingleSparkJobExecutionStrategy<T>
                                                                                    final List<HoodieFileGroupId> fileGroupIdList, final boolean preserveHoodieMetadata,
                                                                                    final TaskContextSupplier taskContextSupplier);
 
+  public abstract Iterator<List<WriteStatus>> performClusteringWithRecordsIterator(final Iterator<HoodieRecord<T>> records, final int numOutputGroups,
+                                                                                   final String instantTime,
+                                                                                   final Map<String, String> strategyParams, final Schema schema,
+                                                                                   final List<HoodieFileGroupId> fileGroupIdList, final boolean preserveHoodieMetadata,
+                                                                                   final TaskContextSupplier taskContextSupplier, ClusteringGroupInfo clusteringGroupInfo);
+
   /**
    * Read records from baseFiles and get iterator.
    */
   private Iterator<HoodieRecord<T>> readRecordsForGroupBaseFiles(List<ClusteringOperation> clusteringOps) {
     List<Iterator<HoodieRecord<T>>> iteratorsForPartition = clusteringOps.stream().map(clusteringOp -> {
-
-      Schema readerSchema = HoodieAvroUtils.addMetadataFields(new Schema.Parser().parse(getWriteConfig().getSchema()));
+      String partitionPath = clusteringOp.getPartitionPath();
+      PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(writeConfig.getMetastoreUris());
+      String tableName = partitionSchemaReader.getTableName(partitionPath);
+      Schema readerStagingSchema = HoodieAvroUtils.addMetadataFields(new Schema.Parser().parse(getWriteConfig().getSchema()));
+      Schema readerSchema = partitionSchemaReader.getPartitionSchema(tableName, readerStagingSchema);
       Iterable<HoodieRecord<T>> indexedRecords = () -> {
         try {
           HoodieFileReader baseFileReader = HoodieFileReaderFactory.getReaderFactory(recordType).getFileReader(getHoodieTable().getHadoopConf(), new Path(clusteringOp.getDataFilePath()));
@@ -167,4 +186,70 @@ public abstract class SingleSparkJobExecutionStrategy<T>
 
     return new ConcatenatingIterator<>(iteratorsForPartition);
   }
+
+  private Iterator<HoodieRecord<T>> readRecordsForGroupDeltaFiles(List<ClusteringOperation> clusteringOps, String instantTime) {
+    List<Iterator<HoodieRecord<T>>> iteratorsForPartition = clusteringOps.stream().map(clusteringOp -> {
+      long maxMemoryPerCompaction = IOUtils.getMaxMemoryPerCompaction(new SparkTaskContextSupplier(), writeConfig);
+      LOG.warn("MaxMemoryPerCompaction run as part of clustering => " + maxMemoryPerCompaction);
+      Iterable<HoodieRecord<T>> indexedRecords = () -> {
+        try {
+          Schema readerSchema = HoodieAvroUtils.addMetadataFields(new Schema.Parser().parse(writeConfig.getSchema()));
+          Schema partitionReaderSchema = readerSchema;
+          if (writeConfig.isVirtualPartioningEnabled()) {
+            PartitionSchemaReader partitionSchemaReader = HiveMetastoreFactory.build(writeConfig.getMetastoreUris());
+            String tableName = partitionSchemaReader.getTableName(clusteringOp.getPartitionPath());
+            partitionReaderSchema = partitionSchemaReader.getPartitionSchema(tableName, readerSchema);
+          }
+          HoodieMergedLogRecordScanner scanner = HoodieMergedLogRecordScanner.newBuilder()
+              .withFileSystem(getHoodieTable().getMetaClient().getFs())
+              .withBasePath(getHoodieTable().getMetaClient().getBasePath())
+              .withLogFilePaths(clusteringOp.getDeltaFilePaths())
+              .withReaderSchema(partitionReaderSchema)
+              .withLatestInstantTime(instantTime)
+              .withMaxMemorySizeInBytes(maxMemoryPerCompaction)
+              .withReadBlocksLazily(writeConfig.getCompactionLazyBlockReadEnabled())
+              .withReverseReader(writeConfig.getCompactionReverseLogReadEnabled())
+              .withBufferSize(writeConfig.getMaxDFSStreamBufferSize())
+              .withSpillableMapBasePath(writeConfig.getSpillableMapBasePath())
+              .withPartition(clusteringOp.getPartitionPath())
+              .withOptimizedLogBlocksScan(writeConfig.enableOptimizedLogBlocksScan())
+              .withDiskMapType(writeConfig.getCommonConfig().getSpillableDiskMapType())
+              .withBitCaskDiskMapCompressionEnabled(writeConfig.getCommonConfig().isBitCaskDiskMapCompressionEnabled())
+              .withRecordMerger(writeConfig.getRecordMerger())
+              .build();
+
+          Option<HoodieFileReader> baseFileReader = null;
+          try {
+            baseFileReader = StringUtils.isNullOrEmpty(clusteringOp.getDataFilePath())
+                ? Option.empty()
+                : Option.of(HoodieFileReaderFactory.getReaderFactory(recordType).getFileReader(getHoodieTable().getHadoopConf(), new Path(clusteringOp.getDataFilePath())));
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+          HoodieTableConfig tableConfig = getHoodieTable().getMetaClient().getTableConfig();
+          return getFileSliceReader(baseFileReader, scanner, partitionReaderSchema,
+              tableConfig.getProps(),
+              tableConfig.populateMetaFields() ? Option.empty() : Option.of(Pair.of(tableConfig.getRecordKeyFieldProp(),
+                  tableConfig.getPartitionFieldProp())));
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+
+      };
+      return StreamSupport.stream(indexedRecords.spliterator(), false).iterator();
+    }).collect(Collectors.toList());
+    return new ConcatenatingIterator<>(iteratorsForPartition);
+  }
+
+  private Iterator<HoodieRecord<T>> readRecordsForGroup(List<ClusteringOperation> clusteringOps, String instantTime) {
+    boolean hasLogFiles = clusteringOps.stream().anyMatch(op -> op.getDeltaFilePaths().size() > 0);
+    if (hasLogFiles) {
+      // if there are log files, we read all records into memory for a file group and apply updates.
+      return readRecordsForGroupDeltaFiles(clusteringOps, instantTime);
+    } else {
+      // We want to optimize reading records for case there are no log files.
+      return readRecordsForGroupBaseFiles(clusteringOps);
+    }
+  }
+
 }

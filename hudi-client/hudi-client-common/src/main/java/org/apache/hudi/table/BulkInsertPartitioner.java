@@ -19,6 +19,7 @@
 package org.apache.hudi.table;
 
 import org.apache.hudi.common.fs.FSUtils;
+import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.execution.bulkinsert.BulkInsertSortMode;
 import org.apache.hudi.io.WriteHandleFactory;
@@ -61,6 +62,11 @@ public interface BulkInsertPartitioner<I> extends Serializable {
   default String getFileIdPfx(int partitionId) {
     return FSUtils.createNewFileIdPfx();
   }
+
+  default Integer getKeyToFileMapping(HoodieKey hoodieKey) {
+    return 0;
+  }
+
 
   /**
    * Return write handle factory for the given partition.

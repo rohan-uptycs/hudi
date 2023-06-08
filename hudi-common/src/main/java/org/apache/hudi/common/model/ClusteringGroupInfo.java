@@ -34,13 +34,25 @@ public class ClusteringGroupInfo implements Serializable {
   private List<ClusteringOperation> operations;
   private int numOutputGroups;
 
+  private HoodieClusteringGroup hoodieClusteringGroup;
+
+  public ClusteringGroupInfo(List<ClusteringOperation> operations, Integer numOutputFileGroups, HoodieClusteringGroup clusteringGroup) {
+    this.operations = operations;
+    this.numOutputGroups = numOutputFileGroups;
+    this.hoodieClusteringGroup = clusteringGroup;
+  }
+
   public static ClusteringGroupInfo create(HoodieClusteringGroup clusteringGroup) {
     List<ClusteringOperation> operations = clusteringGroup.getSlices().stream()
         .map(ClusteringOperation::create).collect(Collectors.toList());
-    
-    return new ClusteringGroupInfo(operations, clusteringGroup.getNumOutputFileGroups());
+
+    return new ClusteringGroupInfo(operations, clusteringGroup.getNumOutputFileGroups(), clusteringGroup);
   }
-  
+
+  public HoodieClusteringGroup getHoodieClusteringGroup() {
+    return hoodieClusteringGroup;
+  }
+
   // Only for serialization/de-serialization
   @Deprecated
   public ClusteringGroupInfo() {}

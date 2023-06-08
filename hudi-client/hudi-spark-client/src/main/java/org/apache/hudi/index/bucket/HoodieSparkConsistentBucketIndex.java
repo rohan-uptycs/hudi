@@ -270,7 +270,7 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
         }
         boolean isRehashingCommitted = completedCommits.containsInstant(timestamp) || timestamp.equals(HoodieTimeline.INIT_INSTANT_TS);
         if (isRehashingCommitted) {
-          if (commitMetaTss.contains(timestamp)) {
+          if (!commitMetaTss.contains(timestamp)) {
             try {
               createCommitMarker(table, path, partitionPath);
               fixed.add(hashingMetaFile);
@@ -370,10 +370,54 @@ public class HoodieSparkConsistentBucketIndex extends HoodieBucketIndex {
         if (table.getMetaClient().getFs().exists(metadataFilePath)) {
           createCommitMarker(table, metadataFilePath, metadataPartitionPath);
         }
+        deleteLastNfiles(partition, table);
       } catch (IOException e) {
         throw new HoodieIOException("exception while committing hashing metadata for path " + metadataFilePath, e);
       }
     });
+  }
+
+  /***
+   * Delete last N commit files
+   * @param partition
+   * @param table
+   */
+  private void deleteLastNfiles(String partition, HoodieTable table) {
+    try {
+      Predicate<FileStatus> hashingMetadataFilePredicate = fileStatus -> {
+        String filename = fileStatus.getPath().getName();
+        return filename.contains(HASHING_METADATA_FILE_SUFFIX);
+      };
+      Predicate<FileStatus> hashingMetaCommitFilePredicate = fileStatus -> {
+        String filename = fileStatus.getPath().getName();
+        return filename.contains(HoodieConsistentHashingMetadata.HASHING_METADATA_COMMIT_FILE_SUFFIX);
+      };
+
+      Path metadataPath = FSUtils.getPartitionPath(table.getMetaClient().getHashingMetadataPath(), partition);
+      final FileStatus[] metaFiles = table.getMetaClient().getFs().listStatus(metadataPath);
+      final FileStatus[] hashingMetaFiles = Arrays.stream(metaFiles).filter(hashingMetadataFilePredicate)
+          .sorted(Comparator.comparing(f -> f.getPath().getName()))
+          .toArray(FileStatus[]::new);
+      final TreeSet<String> commitMetaTss = Arrays.stream(metaFiles).filter(hashingMetaCommitFilePredicate)
+          .map(commitFile -> HoodieConsistentHashingMetadata.getTimestampFromFile(commitFile.getPath().getName()))
+          .sorted()
+          .collect(Collectors.toCollection(TreeSet::new));
+      int numberOfFiles = hashingMetaFiles.length;
+      int retainFiles = numberOfFiles - 10;
+      for (int i = 0; i < retainFiles; i++) {
+        FileStatus fileStatus = hashingMetaFiles[i];
+        Path path = fileStatus.getPath();
+        String timestamp = HoodieConsistentHashingMetadata.getTimestampFromFile(path.getName());
+        if (commitMetaTss.contains(timestamp) && !timestamp.equals(HoodieTimeline.INIT_INSTANT_TS)) {
+          Path metadataFilePath = new Path(metadataPath, timestamp + HASHING_METADATA_FILE_SUFFIX);
+          Path commitFilePath = new Path(metadataPath, timestamp + HASHING_METADATA_COMMIT_FILE_SUFFIX);
+          table.getMetaClient().getFs().delete(metadataFilePath);
+          table.getMetaClient().getFs().delete(commitFilePath);
+        }
+      }
+    } catch (IOException e) {
+      LOG.info("Unable to list metadata files");
+    }
   }
 
   /***

@@ -25,6 +25,7 @@ import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
 import javax.annotation.concurrent.NotThreadSafe;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -205,7 +206,7 @@ public class ExternalSpillableMap<T extends Serializable, R extends Serializable
       long tmpEstimatedPayloadSize = (long) (this.estimatedPayloadSize * 0.9
           + (keySizeEstimator.sizeEstimate(key) + valueSizeEstimator.sizeEstimate(value)) * 0.1);
       if (this.estimatedPayloadSize != tmpEstimatedPayloadSize) {
-        LOG.info("Update Estimated Payload size to => " + this.estimatedPayloadSize);
+        LOG.debug("Update Estimated Payload size to => " + this.estimatedPayloadSize);
       }
       this.estimatedPayloadSize = tmpEstimatedPayloadSize;
       this.currentInMemoryMapSize = this.inMemoryMap.size() * this.estimatedPayloadSize;
@@ -216,7 +217,7 @@ public class ExternalSpillableMap<T extends Serializable, R extends Serializable
         // At first, use the sizeEstimate of a record being inserted into the spillable map.
         // Note, the converter may over estimate the size of a record in the JVM
         this.estimatedPayloadSize = keySizeEstimator.sizeEstimate(key) + valueSizeEstimator.sizeEstimate(value);
-        LOG.info("Estimated Payload size => " + estimatedPayloadSize);
+        LOG.debug("Estimated Payload size => " + estimatedPayloadSize);
       }
       if (!inMemoryMap.containsKey(key)) {
         // TODO : Add support for adjusting payloadSize for updates to the same key

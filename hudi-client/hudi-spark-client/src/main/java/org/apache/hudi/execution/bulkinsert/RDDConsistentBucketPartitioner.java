@@ -74,6 +74,20 @@ public class RDDConsistentBucketPartitioner<T> extends RDDBucketIndexPartitioner
   private List<Boolean> doAppend;
   private List<String> fileIdPfxList;
 
+  private Map<String, ConsistentBucketIdentifier> partitionToIdentifier;
+  private Map<String, Map<String, Integer>> partitionToFileIdPfxIdxMap;
+
+  public Integer getWritePartition(Object key) {
+    HoodieKey hoodieKey = (HoodieKey) key;
+    String partition = hoodieKey.getPartitionPath();
+    ConsistentHashingNode node = partitionToIdentifier.get(partition).getBucket(hoodieKey, indexKeyFields);
+    return partitionToFileIdPfxIdxMap.get(partition).get(node.getFileIdPrefix());
+  }
+
+  public Map<String, ConsistentBucketIdentifier> getPartitionToIdentifier() {
+    return partitionToIdentifier;
+  }
+
   public RDDConsistentBucketPartitioner(HoodieTable table, Map<String, String> strategyParams, boolean preserveHoodieMetadata) {
     this.table = table;
     this.indexKeyFields = Arrays.asList(table.getConfig().getBucketIndexHashField().split(","));
@@ -94,6 +108,10 @@ public class RDDConsistentBucketPartitioner<T> extends RDDBucketIndexPartitioner
         "RDDConsistentBucketPartitioner can only be used together with consistent hashing bucket index");
     ValidationUtils.checkArgument(table.getMetaClient().getTableType().equals(HoodieTableType.MERGE_ON_READ),
         "CoW table with bucket index doesn't support bulk_insert");
+  }
+
+  public Map<String, Map<String, Integer>> getPartitionToFileIdPfxIdxMap() {
+    return partitionToFileIdPfxIdxMap;
   }
 
   /**
@@ -123,6 +141,10 @@ public class RDDConsistentBucketPartitioner<T> extends RDDBucketIndexPartitioner
         return partitionToFileIdPfxIdxMap.get(partition).get(node.getFileIdPrefix());
       }
     });
+  }
+
+  public void setUpPartitioner(String partitionPath) {
+    initializeBucketIdentifier(partitionPath);
   }
 
   @Override
@@ -167,6 +189,13 @@ public class RDDConsistentBucketPartitioner<T> extends RDDBucketIndexPartitioner
     return records.map(HoodieRecord::getPartitionPath).distinct().collect().stream()
         .collect(Collectors.toMap(p -> p, p -> getBucketIdentifier(p)));
   }
+
+  private void initializeBucketIdentifier(String partitionPath) {
+    partitionToIdentifier = new HashMap<>();
+    partitionToIdentifier.put(partitionPath, getBucketIdentifier(partitionPath));
+    partitionToFileIdPfxIdxMap = generateFileIdPfx(partitionToIdentifier);
+  }
+
 
   /**
    * Initialize fileIdPfx for each data partition. Specifically, the following fields is constructed:
@@ -272,5 +301,10 @@ public class RDDConsistentBucketPartitioner<T> extends RDDBucketIndexPartitioner
     return records.mapToPair(record -> new Tuple2<>(record.getKey(), record))
         .repartitionAndSortWithinPartitions(partitioner, comparator)
         .map(Tuple2::_2);
+  }
+
+  @Override
+  public Integer getKeyToFileMapping(HoodieKey hoodieKey) {
+    return getWritePartition(hoodieKey);
   }
 }

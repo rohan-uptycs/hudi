@@ -147,34 +147,6 @@ public class MercifulJsonConverter {
     throw new IllegalArgumentException("JsonConverter cannot handle type: " + schema.getType());
   }
 
-  /**
-   * Base Class for converting json to avro fields.
-   */
-  private abstract static class JsonToAvroFieldProcessor implements Serializable {
-
-    public Object convertToAvro(Object value, String name, Schema schema) {
-      Pair<Boolean, Object> res = convert(value, name, schema);
-      if (!res.getLeft()) {
-        LOG.warn("error converting failed" + name + "to type " + schema.getType().toString() + " for value {} " + value);
-      }
-      return res.getRight();
-    }
-
-    protected abstract Pair<Boolean, Object> convert(Object value, String name, Schema schema);
-  }
-
-  private static JsonToAvroFieldProcessor generateBooleanTypeHandler() {
-    return new JsonToAvroFieldProcessor() {
-      @Override
-      public Pair<Boolean, Object> convert(Object value, String name, Schema schema) {
-        if (value instanceof Boolean) {
-          return Pair.of(true, value);
-        }
-        return Pair.of(false, null);
-      }
-    };
-  }
-
   private static JsonToAvroFieldProcessor generateIntTypeHandler() {
     return new JsonToAvroFieldProcessor() {
       @Override
@@ -186,9 +158,21 @@ public class MercifulJsonConverter {
             Integer fieldValue = Integer.valueOf((String) value);
             return Pair.of(true, fieldValue);
           } catch (NumberFormatException numberFormatException) {
-            LOG.info("number format exception occured for " + name + " value " + value);
+            LOG.debug("number format exception occured for " + name + " value " + value);
             return Pair.of(false, null);
           }
+        }
+        return Pair.of(false, null);
+      }
+    };
+  }
+
+  private static JsonToAvroFieldProcessor generateBooleanTypeHandler() {
+    return new JsonToAvroFieldProcessor() {
+      @Override
+      public Pair<Boolean, Object> convert(Object value, String name, Schema schema) {
+        if (value instanceof Boolean) {
+          return Pair.of(true, value);
         }
         return Pair.of(false, null);
       }
@@ -206,7 +190,7 @@ public class MercifulJsonConverter {
             Double fieldValue = Double.valueOf((String) value);
             return Pair.of(true, fieldValue);
           } catch (NumberFormatException numberFormatException) {
-            LOG.info("number format exception occured for " + name + " value " + value);
+            LOG.debug("number format exception occured for " + name + " value " + value);
             return Pair.of(false, null);
           }
 
@@ -227,7 +211,7 @@ public class MercifulJsonConverter {
             Float fieldValue = Float.valueOf((String) value);
             return Pair.of(true, fieldValue);
           } catch (NumberFormatException numberFormatException) {
-            LOG.info("number format exception occured for " + name + " value " + value);
+            LOG.debug("number format exception occured for " + name + " value " + value);
             return Pair.of(false, null);
           }
 
@@ -248,13 +232,29 @@ public class MercifulJsonConverter {
             Long fieldValue = Long.valueOf((String) value);
             return Pair.of(true, fieldValue);
           } catch (NumberFormatException numberFormatException) {
-            LOG.info("number format exception occured for " + name + " value " + value);
+            LOG.debug("number format exception occured for " + name + " value " + value);
             return Pair.of(false, null);
           }
         }
         return Pair.of(false, null);
       }
     };
+  }
+
+  /**
+   * Base Class for converting json to avro fields.
+   */
+  private abstract static class JsonToAvroFieldProcessor implements Serializable {
+
+    public Object convertToAvro(Object value, String name, Schema schema) {
+      Pair<Boolean, Object> res = convert(value, name, schema);
+      if (!res.getLeft()) {
+        LOG.debug("error converting failed" + name + "to type " + schema.getType().toString() + " for value {} " + value);
+      }
+      return res.getRight();
+    }
+
+    protected abstract Pair<Boolean, Object> convert(Object value, String name, Schema schema);
   }
 
   private static JsonToAvroFieldProcessor generateStringTypeHandler() {
